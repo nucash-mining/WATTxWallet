@@ -1,0 +1,65 @@
+name: wattx_wallet
+description: "WATTx Wallet — Testnet v0.1.0. Staking, sending, CPU mining, EVM smart contracts."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # HTTP / JSON-RPC
+  http: ^1.2.1
+  dio: ^5.4.3
+
+  # State management
+  provider: ^6.1.2
+
+  # Secure key storage
+  flutter_secure_storage: ^9.2.2
+
+  # Crypto / wallet
+  pointycastle: ^3.9.1
+  hex: ^0.2.0
+  bip39: ^1.0.6
+  ed25519_hd_key: ^2.3.0
+
+  # Battery & device info (for mining warning)
+  battery_plus: ^6.0.2
+  device_info_plus: ^10.1.2
+
+  # QR code
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
+
+  # Local storage / preferences
+  shared_preferences: ^2.3.2
+
+  # Charts for mining stats
+  fl_chart: ^0.69.0
+
+  # Clipboard
+  clipboard: ^0.1.3
+
+  # Connectivity
+  connectivity_plus: ^6.0.3
+
+  # Wakelock (keep screen on while mining)
+  wakelock_plus: ^1.2.8
+
+  # Crypto primitives for CPU miner
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
