@@ -1,0 +1,127 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Flutter ──────────────────────────────────────────────────────────────
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.9'
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # ── CocoaPods ─────────────────────────────────────────────────────────────
+      - name: Install CocoaPods
+        run: |
+          sudo gem install cocoapods --no-document
+          cd ios && pod install --repo-update
+
+      # ── Code signing (no-entitlement unsigned IPA for sideloading) ───────────
+      # If you have an Apple Developer account, add these secrets to your repo:
+      #   APPLE_CERTIFICATE_BASE64  — base64 of your .p12 signing certificate
+      #   APPLE_CERTIFICATE_PASSWORD — password for the .p12
+      #   APPLE_PROVISIONING_PROFILE_BASE64 — base64 of your .mobileprovision
+      #   APPLE_TEAM_ID — your 10-character team ID (e.g. ABC1234567)
+      #
+      # Without those secrets the build produces an unsigned IPA (sideloadable
+      # via AltStore, Sideloadly, etc.).
+
+      - name: Import signing certificate
+        if: ${{ env.APPLE_CERTIFICATE_BASE64 != '' }}
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Create keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          echo -n "$APPLE_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          # Import provisioning profile
+          PP_PATH=$RUNNER_TEMP/build.mobileprovision
+          echo -n "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/
+
+          # Export TEAM_ID for Xcode
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+
+      # ── Build IPA ─────────────────────────────────────────────────────────────
+      - name: Build iOS (no codesign — sideloadable)
+        if: ${{ env.APPLE_CERTIFICATE_BASE64 == '' }}
+        run: |
+          flutter build ios --release --no-codesign
+          # Package into unsigned IPA
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -r ../WATTxWallet-v0.1.0-testnet-unsigned.ipa Payload
+          echo "IPA_PATH=build/ios/WATTxWallet-v0.1.0-testnet-unsigned.ipa" >> "$GITHUB_ENV"
+          echo "IPA_NAME=WATTxWallet-v0.1.0-testnet-unsigned.ipa" >> "$GITHUB_ENV"
+
+      - name: Build iOS (signed — with Apple Developer account)
+        if: ${{ env.APPLE_CERTIFICATE_BASE64 != '' }}
+        run: |
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist
+          IPA=$(find build/ios/ipa -name "*.ipa" | head -1)
+          BASENAME=$(basename "$IPA")
+          mv "$IPA" "build/ios/ipa/WATTxWallet-v0.1.0-testnet-${BASENAME}"
+          echo "IPA_PATH=build/ios/ipa/WATTxWallet-v0.1.0-testnet-${BASENAME}" >> "$GITHUB_ENV"
+          echo "IPA_NAME=WATTxWallet-v0.1.0-testnet-${BASENAME}" >> "$GITHUB_ENV"
+
+      # ── Upload artifact ───────────────────────────────────────────────────────
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WATTxWallet-iOS
+          path: build/ios/*.ipa
+          retention-days: 30
+
+      # ── Attach to GitHub release on tag push ──────────────────────────────────
+      - name: Upload IPA to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/ios/*.ipa
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Cleanup keychain ──────────────────────────────────────────────────────
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/build.keychain 2>/dev/null || true

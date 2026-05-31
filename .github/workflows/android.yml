@@ -1,0 +1,65 @@
+name: Android Build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.9'
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Build per-ABI APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Rename APKs
+        run: |
+          TAG="${GITHUB_REF_NAME:-dev}"
+          cd build/app/outputs/flutter-apk
+          for f in app-*-release.apk; do
+            mv "$f" "WATTxWallet-${TAG}-${f/-release/}"
+          done
+          mv app-release.apk "WATTxWallet-${TAG}-universal.apk" 2>/dev/null || true
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WATTxWallet-Android
+          path: build/app/outputs/flutter-apk/WATTxWallet-*.apk
+          retention-days: 30
+
+      - name: Upload APKs to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/WATTxWallet-*.apk
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
