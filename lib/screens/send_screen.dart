@@ -34,7 +34,8 @@ class _SendScreenState extends State<SendScreen> {
       return;
     }
     setState(() { _sending = true; _error = null; _txid = null; });
-    final txid = await context.read<WalletProvider>().sendCoins(addr, amt, _noteCtrl.text.trim());
+    final provider = context.read<WalletProvider>();
+    final txid = await provider.sendCoins(addr, amt, _noteCtrl.text.trim());
     setState(() {
       _sending = false;
       if (txid != null) {
@@ -43,7 +44,10 @@ class _SendScreenState extends State<SendScreen> {
         _amtCtrl.clear();
         _noteCtrl.clear();
       } else {
-        _error = 'Transaction failed. Check balance and unlock wallet.';
+        // Show the real reason (insufficient funds, node unreachable, …) instead
+        // of a generic message — there is no wallet to "unlock" in self-custody.
+        final msg = provider.errorMessage;
+        _error = msg.isEmpty ? 'Transaction failed.' : msg;
       }
     });
   }

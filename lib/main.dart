@@ -5,7 +5,13 @@ import 'screens/dashboard_screen.dart';
 import 'screens/send_screen.dart';
 import 'screens/receive_screen.dart';
 import 'screens/staking_screen.dart';
-import 'screens/mining_screen.dart';
+// Mining is temporarily removed from the UI (2026-08-10): phone/CPU mining on a
+// near-empty algo port lets weak miners sweep cheap blocks, so the miner tab is
+// hidden until a phone-appropriate mining algorithm exists. The miner services
+// (pool_miner.dart / cpu_miner.dart) and mining_screen.dart are kept so it can
+// be re-added by restoring the import, route, tab, and screen below.
+// import 'screens/mining_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
@@ -37,14 +43,24 @@ class WATTxApp extends StatelessWidget {
       ),
       initialRoute: '/',
       routes: {
-        '/': (_) => const _Shell(),
+        '/': (_) => const _Gate(),
         '/send': (_) => const SendScreen(),
         '/receive': (_) => const ReceiveScreen(),
         '/staking': (_) => const StakingScreen(),
-        '/mining': (_) => const MiningScreen(),
         '/settings': (_) => const SettingsScreen(),
       },
     );
+  }
+}
+
+/// Shows onboarding until a wallet exists, then the main shell.
+class _Gate extends StatelessWidget {
+  const _Gate();
+  @override
+  Widget build(BuildContext context) {
+    final wallet = context.watch<WalletProvider>();
+    if (wallet.needsOnboarding) return const OnboardingScreen();
+    return const _Shell();
   }
 }
 
@@ -61,7 +77,6 @@ class _ShellState extends State<_Shell> {
     DashboardScreen(),
     ReceiveScreen(),
     StakingScreen(),
-    MiningScreen(),
   ];
 
   @override
@@ -95,11 +110,6 @@ class _ShellState extends State<_Shell> {
             icon: Icon(Icons.stacked_bar_chart_outlined),
             selectedIcon: Icon(Icons.stacked_bar_chart, color: Color(0xFFF7C948)),
             label: 'Stake',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.memory_outlined),
-            selectedIcon: Icon(Icons.memory, color: Color(0xFFF7C948)),
-            label: 'Mine',
           ),
         ],
       ),

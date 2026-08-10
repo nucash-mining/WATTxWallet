@@ -1,227 +1,150 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+
 import '../providers/wallet_provider.dart';
-import '../services/rpc_service.dart';
+import '../services/node_service.dart';
+import '../services/wallet_store.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
 
-class _SettingsScreenState extends State<SettingsScreen> {
-  final _hostCtrl = TextEditingController();
-  final _portCtrl = TextEditingController();
-  final _userCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  bool _testnet = true;
-  bool _saving = false;
-  bool _testing = false;
-  String? _testResult;
-
-  @override
-  void initState() {
-    super.initState();
-    final rpc = RpcService();
-    _hostCtrl.text = rpc.host;
-    _portCtrl.text = rpc.port.toString();
-    _testnet = rpc.isTestnet;
-  }
-
-  @override
-  void dispose() {
-    _hostCtrl.dispose();
-    _portCtrl.dispose();
-    _userCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() { _saving = true; _testResult = null; });
-    await RpcService().saveConfig(
-      host: _hostCtrl.text.trim(),
-      port: int.tryParse(_portCtrl.text.trim()) ?? 13890,
-      user: _userCtrl.text.trim().isEmpty ? 'wattxrpc' : _userCtrl.text.trim(),
-      password: _passCtrl.text,
-      testnet: _testnet,
+  Future<void> _revealSeed(BuildContext context) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('Reveal recovery phrase',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+            'Your recovery phrase controls your funds. Only reveal it somewhere '
+            'private. Never share it — anyone who has it can take your coins.',
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Reveal')),
+        ],
+      ),
     );
-    await context.read<WalletProvider>().connect();
-    setState(() => _saving = false);
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _testConnection() async {
-    setState(() { _testing = true; _testResult = null; });
-    final ok = await RpcService().testConnection();
-    setState(() {
-      _testing = false;
-      _testResult = ok ? 'Connected!' : 'Failed — check host/port/credentials';
-    });
+    if (proceed != true) return;
+    final mnemonic = await WalletStore.revealMnemonic();
+    if (mnemonic == null || !context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('Recovery phrase',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SelectableText(mnemonic,
+                style: const TextStyle(
+                    color: Color(0xFFF7C948),
+                    fontSize: 16,
+                    height: 1.5,
+                    fontWeight: FontWeight.w600)),
+            TextButton.icon(
+              icon: const Icon(Icons.copy, size: 16),
+              label: const Text('Copy'),
+              onPressed: () =>
+                  Clipboard.setData(ClipboardData(text: mnemonic)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final wallet = context.watch<WalletProvider>();
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        title: const Text('RPC Settings', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+          title: const Text('Settings'),
+          backgroundColor: const Color(0xFF161B22)),
+      body: ListView(
+        children: [
+          const _SectionHeader('Wallet'),
+          ListTile(
+            title: const Text('Receive address',
+                style: TextStyle(color: Colors.white)),
+            subtitle: Text(wallet.receiveAddress,
+                style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, color: Colors.white54),
+              onPressed: () => Clipboard.setData(
+                  ClipboardData(text: wallet.receiveAddress)),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.key, color: Color(0xFFF7C948)),
+            title: const Text('Reveal recovery phrase',
+                style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Back up your 12 words',
+                style: TextStyle(color: Colors.white54)),
+            onTap: () => _revealSeed(context),
+          ),
+          const _SectionHeader('Network (seednodes)'),
+          ...NodeService.defaultEndpoints.map((e) => ListTile(
+                leading: Icon(
+                    e == wallet.node.activeEndpoint
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    color: e == wallet.node.activeEndpoint
+                        ? const Color(0xFF3FB950)
+                        : Colors.white38,
+                    size: 18),
+                title: Text(e,
+                    style:
+                        const TextStyle(color: Colors.white, fontSize: 13)),
+              )),
+          ListTile(
+            title: Text(
+                wallet.status == WalletStatus.connected
+                    ? 'Connected · block ${wallet.blockHeight}'
+                    : 'Not connected',
+                style: TextStyle(
+                    color: wallet.status == WalletStatus.connected
+                        ? const Color(0xFF3FB950)
+                        : Colors.redAccent)),
+            trailing: TextButton(
+              onPressed: () => context.read<WalletProvider>().connect(),
+              child: const Text('Reconnect'),
+            ),
+          ),
+          const _SectionHeader('About'),
+          const ListTile(
+            title: Text('WATTx Wallet', style: TextStyle(color: Colors.white)),
+            subtitle: Text('Self-custody · keys stored on this device only',
+                style: TextStyle(color: Colors.white54)),
+          ),
+        ],
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        _section('Remote Node'),
-        _field('Host / IP', _hostCtrl, hint: '76.131.208.215'),
-        const SizedBox(height: 12),
-        _field('RPC Port', _portCtrl, hint: '13890', isNum: true),
-        const SizedBox(height: 12),
-        _field('RPC Username', _userCtrl, hint: 'wattxrpc'),
-        const SizedBox(height: 12),
-        _field('RPC Password', _passCtrl, hint: '••••••', obscure: true),
-        const SizedBox(height: 12),
-        Row(children: [
-          const Text('Testnet Mode', style: TextStyle(color: Colors.white70)),
-          const Spacer(),
-          Switch(
-            value: _testnet,
-            onChanged: (v) => setState(() => _testnet = v),
-            activeColor: const Color(0xFFF7C948),
-          ),
-        ]),
-        const SizedBox(height: 20),
-
-        _info('Default seednode: 76.131.208.215:13890 (testnet RPC)\n'
-            'Enable "Testnet Mode" to connect to WATTx testnet v0.1.0'),
-
-        const SizedBox(height: 20),
-        Row(children: [
-          Expanded(child: OutlinedButton(
-            style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white70),
-            onPressed: _testing ? null : _testConnection,
-            child: _testing
-                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Test Connection'),
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7C948), foregroundColor: Colors.black),
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Save & Connect', style: TextStyle(fontWeight: FontWeight.bold)),
-          )),
-        ]),
-
-        if (_testResult != null) Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: Text(_testResult!,
-            style: TextStyle(color: _testResult!.contains('!') ? const Color(0xFF3FB950) : Colors.red),
-            textAlign: TextAlign.center,
-          ),
-        ),
-
-        const SizedBox(height: 32),
-        _section('Backup & Security'),
-        ListTile(
-          tileColor: const Color(0xFF161B22),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          leading: const Icon(Icons.vpn_key, color: Color(0xFFF7C948)),
-          title: const Text('Export Private Key', style: TextStyle(color: Colors.white)),
-          subtitle: const Text('Keep your key offline and secure', style: TextStyle(color: Colors.white38, fontSize: 12)),
-          onTap: () => _exportKey(context),
-        ),
-      ]),
     );
   }
+}
 
-  Future<void> _exportKey(BuildContext context) async {
-    final passCtrl = TextEditingController();
-    await showDialog(context: context, builder: (ctx) => AlertDialog(
-      backgroundColor: const Color(0xFF161B22),
-      title: const Text('Export Private Key', style: TextStyle(color: Colors.white)),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Enter your wallet passphrase to reveal the private key.',
-            style: TextStyle(color: Colors.white54, fontSize: 13)),
-        const SizedBox(height: 12),
-        TextField(
-          controller: passCtrl,
-          obscureText: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: 'Passphrase',
-            hintStyle: const TextStyle(color: Colors.white38),
-            filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
-          ),
-        ),
-      ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white38))),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700),
-          onPressed: () async {
-            Navigator.pop(ctx);
-            final wallet = context.read<WalletProvider>();
-            final addr = wallet.receiveAddress;
-            try {
-              await wallet.rpc.walletPassphrase(passCtrl.text, 30);
-              final key = await wallet.rpc.dumpPrivKey(addr);
-              if (mounted) {
-                showDialog(context: context, builder: (_) => AlertDialog(
-                  backgroundColor: const Color(0xFF161B22),
-                  title: const Text('Private Key', style: TextStyle(color: Colors.orange)),
-                  content: SelectableText(key, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 12)),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done', style: TextStyle(color: Colors.white))),
-                  ],
-                ));
-              }
-            } catch (e) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade800));
-            }
-          },
-          child: const Text('Reveal Key', style: TextStyle(color: Colors.white)),
-        ),
-      ],
-    ));
-  }
-
-  Widget _section(String t) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Text(t, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-  );
-
-  Widget _field(String label, TextEditingController ctrl, {String hint = '', bool isNum = false, bool obscure = false}) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-        const SizedBox(height: 4),
-        TextField(
-          controller: ctrl,
-          keyboardType: isNum ? TextInputType.number : TextInputType.text,
-          obscureText: obscure,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Colors.white24),
-            filled: true,
-            fillColor: const Color(0xFF161B22),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-          ),
-        ),
-      ]);
-
-  Widget _info(String t) => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: const Color(0xFF58A6FF).withOpacity(0.08),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.2)),
-    ),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Icon(Icons.info_outline, color: Color(0xFF58A6FF), size: 16),
-      const SizedBox(width: 8),
-      Expanded(child: Text(t, style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12))),
-    ]),
-  );
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader(this.title);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+        child: Text(title.toUpperCase(),
+            style: const TextStyle(
+                color: Color(0xFFF7C948),
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2)),
+      );
 }

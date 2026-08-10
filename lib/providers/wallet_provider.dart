@@ -1,29 +1,48 @@
 import 'package:flutter/foundation.dart';
-import '../services/rpc_service.dart';
+
+import '../services/node_service.dart';
+import '../services/staking_service.dart';
+import '../services/tx_service.dart';
+import '../services/wallet_store.dart';
+import '../services/wattx_wallet.dart';
 
 enum WalletStatus { disconnected, connecting, connected, error }
 
+/// Self-custody wallet state. Keys live on-device (see [WalletStore]); chain
+/// data and broadcasts go through public indexer nodes (see [NodeService]).
+/// The remote-RPC model this replaced is gone — no node holds the user's keys.
 class WalletProvider extends ChangeNotifier {
-  final RpcService _rpc = RpcService();
+  final NodeService _node = NodeService();
+  static const WattxNet net = WattxNet.mainnet;
+
+  WattxWallet? _wallet;
+  bool needsOnboarding = false;
 
   WalletStatus status = WalletStatus.disconnected;
   String errorMessage = '';
 
-  // Blockchain
+  // Chain
   int blockHeight = 0;
-  String chainName = 'test';
+  String chainName = 'wattx';
   double difficulty = 0;
-  bool initialBlockDownload = true;
+  bool initialBlockDownload = false;
 
   // Wallet
-  double balance = 0;
+  int _spendableSats = 0;
+  int _maturingSats = 0;
+  // "balance" is the SPENDABLE balance — the only amount a send can use. Immature
+  // mining/coinbase payouts are reported separately as [maturingBalance] so the
+  // headline number never overstates what the user can actually spend.
+  double get balance => _spendableSats / 1e8;
+  double get maturingBalance => _maturingSats / 1e8;
+  bool get hasMaturing => _maturingSats > 0;
   double unconfirmedBalance = 0;
-  List<String> addresses = [];
+  List<Utxo> _utxos = [];
   List<Map<String, dynamic>> transactions = [];
 
-  // Staking
-  bool stakingEnabled = false;
-  bool walletUnlocked = false;
+  // Staking (Qtum offline-staking delegation to a superstaker)
+  bool stakingEnabled = true;
+  bool walletUnlocked = true; // self-custody: no separate node unlock
   double expectedReward = 0;
   double networkWeight = 0;
   double walletWeight = 0;
@@ -31,148 +50,127 @@ class WalletProvider extends ChangeNotifier {
   List<Map<String, dynamic>> validators = [];
   List<Map<String, dynamic>> delegations = [];
 
-  // Network
   int connectionCount = 0;
 
-  RpcService get rpc => _rpc;
+  NodeService get node => _node;
+  WattxWallet? get wallet => _wallet;
+  String get receiveAddress => _wallet?.legacyAddress ?? '';
+  List<String> get addresses =>
+      _wallet == null ? const [] : [_wallet!.legacyAddress];
 
   Future<void> init() async {
-    await _rpc.loadConfig();
+    if (!await WalletStore.hasWallet()) {
+      needsOnboarding = true;
+      notifyListeners();
+      return;
+    }
+    _wallet = await WalletStore.load(net: net);
+    needsOnboarding = false;
+    await connect();
+  }
+
+  /// Called by onboarding once a wallet is created/imported.
+  Future<void> onWalletReady(WattxWallet w) async {
+    _wallet = w;
+    needsOnboarding = false;
+    notifyListeners();
     await connect();
   }
 
   Future<bool> connect() async {
     status = WalletStatus.connecting;
     notifyListeners();
-
-    final ok = await _rpc.testConnection();
-    if (!ok) {
+    try {
+      blockHeight = await _node.getHeight();
+      connectionCount = 1;
+      status = WalletStatus.connected;
+      errorMessage = '';
+      notifyListeners();
+      await refresh();
+      return true;
+    } catch (e) {
       status = WalletStatus.error;
-      errorMessage = 'Cannot reach ${_rpc.host}:${_rpc.port}';
+      errorMessage = 'Cannot reach WATTx nodes (${_node.activeEndpoint})';
+      connectionCount = 0;
       notifyListeners();
       return false;
     }
-
-    status = WalletStatus.connected;
-    errorMessage = '';
-    notifyListeners();
-    await refresh();
-    return true;
   }
 
   Future<void> refresh() async {
-    if (status != WalletStatus.connected) return;
-    await Future.wait([
-      _refreshChain(),
-      _refreshWallet(),
-      _refreshStaking(),
-      _refreshNetwork(),
-    ]);
+    if (_wallet == null) return;
+    try {
+      blockHeight = await _node.getHeight();
+      final addr = _wallet!.legacyAddress;
+      _utxos = await _node.getUtxos(addr);
+      _spendableSats =
+          _utxos.where((u) => u.spendable).fold(0, (s, u) => s + u.value);
+      _maturingSats =
+          _utxos.where((u) => !u.spendable).fold(0, (s, u) => s + u.value);
+      walletWeight = _spendableSats / 1e8;
+      status = WalletStatus.connected;
+      connectionCount = 1;
+    } catch (e) {
+      status = WalletStatus.error;
+      errorMessage = 'Refresh failed: $e';
+    }
     notifyListeners();
   }
 
-  Future<void> _refreshChain() async {
-    try {
-      final info = await _rpc.getBlockchainInfo();
-      blockHeight = (info['blocks'] as num).toInt();
-      chainName = info['chain'] as String? ?? 'test';
-      difficulty = (info['difficulty'] as num?)?.toDouble() ?? 0;
-      initialBlockDownload = info['initialblockdownload'] as bool? ?? false;
-    } catch (_) {}
-  }
+  /// Self-custody has one HD receive address; kept as a method so existing UI
+  /// that calls it still works.
+  Future<String> getNewAddress() async => receiveAddress;
 
-  Future<void> _refreshWallet() async {
+  /// Build, sign, and broadcast a send. Returns the txid, or null on failure
+  /// (with [errorMessage] set).
+  Future<String?> sendCoins(String toAddress, double amount, String note) async {
+    if (_wallet == null) return null;
     try {
-      balance = await _rpc.getBalance();
-    } catch (_) {}
-    try {
-      unconfirmedBalance = await _rpc.getBalance(0);
-    } catch (_) {}
-    try {
-      final allAddrs = await _rpc.getAddresses();
-      if (allAddrs.isEmpty) {
-        final addr = await _rpc.getNewAddress();
-        addresses = [addr];
-      } else {
-        addresses = allAddrs;
-      }
-    } catch (_) {}
-    try {
-      transactions = await _rpc.listTransactions(50);
-    } catch (_) {}
-  }
-
-  Future<void> _refreshStaking() async {
-    try {
-      final info = await _rpc.getStakingInfo();
-      stakingEnabled = info['enabled'] as bool? ?? false;
-      walletUnlocked = info['staking'] as bool? ?? false;
-      expectedReward = (info['expectedtime'] as num?)?.toDouble() ?? 0;
-      networkWeight = (info['netstakeweight'] as num?)?.toDouble() ?? 0;
-      walletWeight = (info['weight'] as num?)?.toDouble() ?? 0;
-    } catch (_) {}
-    try {
-      validatorInfo = await _rpc.getMyValidator();
-    } catch (_) {}
-    try {
-      validators = await _rpc.listValidators();
-    } catch (_) {}
-    try {
-      delegations = await _rpc.getMyDelegations();
-    } catch (_) {}
-  }
-
-  Future<void> _refreshNetwork() async {
-    try {
-      connectionCount = await _rpc.getConnectionCount();
-    } catch (_) {}
-  }
-
-  Future<bool> unlockWallet(String passphrase, {bool stakingOnly = true}) async {
-    try {
-      await _rpc.walletPassphrase(passphrase, 9999999, stakingOnly: stakingOnly);
-      walletUnlocked = true;
-      notifyListeners();
-      return true;
+      final utxos = await _node.getUtxos(_wallet!.legacyAddress);
+      final built = TxService.buildSend(
+        wallet: _wallet!,
+        toAddress: toAddress.trim(),
+        amountSats: (amount * 1e8).round(),
+        utxos: utxos,
+      );
+      final txid = await _node.broadcast(built.hex);
+      await refresh();
+      return txid;
     } catch (e) {
       errorMessage = e.toString();
       notifyListeners();
-      return false;
+      return null;
     }
   }
 
-  Future<bool> lockWallet() async {
+  /// Delegate this wallet's staking to [stakerAddress] for [feePercent], via the
+  /// on-chain 0x0086 offline-staking contract. Returns the txid or null.
+  Future<String?> delegateToStaker(String stakerAddress, int feePercent) async {
+    if (_wallet == null) return null;
     try {
-      await _rpc.walletLock();
-      walletUnlocked = false;
-      notifyListeners();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<String?> sendCoins(String address, double amount, String note) async {
-    try {
-      final txid = await _rpc.sendToAddress(address, amount, note);
-      await _refreshWallet();
-      notifyListeners();
+      final utxos = await _node.getUtxos(_wallet!.legacyAddress);
+      final hex = StakingService.buildAddDelegation(
+        wallet: _wallet!,
+        stakerAddress: stakerAddress.trim(),
+        feePercent: feePercent,
+        utxos: utxos,
+      );
+      final txid = await _node.broadcast(hex);
+      await refresh();
       return txid;
     } catch (e) {
-      return null;
-    }
-  }
-
-  Future<String?> getNewAddress() async {
-    try {
-      final addr = await _rpc.getNewAddress();
-      addresses = [addr, ...addresses];
+      errorMessage = e.toString();
       notifyListeners();
-      return addr;
-    } catch (_) {
       return null;
     }
   }
 
-  String get receiveAddress => addresses.isNotEmpty ? addresses.first : '';
+  // Self-custody: no node-side unlock. Kept as no-ops for existing UI.
+  Future<bool> unlockWallet(String passphrase, {bool stakingOnly = false}) async {
+    walletUnlocked = true;
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> lockWallet() async {}
 }

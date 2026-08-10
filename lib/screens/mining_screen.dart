@@ -4,7 +4,7 @@ import 'package:battery_plus/battery_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:provider/provider.dart';
 import '../providers/wallet_provider.dart';
-import '../services/cpu_miner.dart';
+import '../services/pool_miner.dart';
 
 class MiningScreen extends StatefulWidget {
   const MiningScreen({super.key});
@@ -14,8 +14,8 @@ class MiningScreen extends StatefulWidget {
 
 class _MiningScreenState extends State<MiningScreen> {
   final Battery _battery = Battery();
-  CpuMiner? _miner;
-  MiningStats _stats = const MiningStats();
+  PoolMiner? _miner;
+  PoolMiningStats _stats = const PoolMiningStats();
   BatteryState _batteryState = BatteryState.unknown;
   int _batteryLevel = 100;
   int _threads = 1;
@@ -45,12 +45,34 @@ class _MiningScreenState extends State<MiningScreen> {
       _warningAcknowledged = true;
     }
 
-    final rpc = context.read<WalletProvider>().rpc;
-    _miner = CpuMiner(rpc, threads: _threads);
+    // The pool credits shares to this address, so mining without one would
+    // hand the reward to nobody.
+    final address = context.read<WalletProvider>().receiveAddress;
+    if (address.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Create or load a wallet first — mining pays to your WATTx address.'),
+        ));
+      }
+      return;
+    }
+
+    _miner = PoolMiner(threads: _threads);
     _statsSub = _miner!.statsStream.listen((s) {
       if (mounted) setState(() => _stats = s);
     });
-    await _miner!.start();
+    try {
+      await _miner!.start(address);
+    } catch (e) {
+      _miner = null;
+      _statsSub?.cancel();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not reach the pool: $e'),
+        ));
+      }
+      return;
+    }
     await WakelockPlus.enable();
     setState(() {});
   }
@@ -60,7 +82,7 @@ class _MiningScreenState extends State<MiningScreen> {
     _miner = null;
     _statsSub?.cancel();
     WakelockPlus.disable();
-    setState(() => _stats = const MiningStats());
+    setState(() => _stats = const PoolMiningStats());
   }
 
   Future<bool> _showWarningDialog() async {
@@ -78,7 +100,10 @@ class _MiningScreenState extends State<MiningScreen> {
           _bullet('CPU mining generates significant heat and drains battery quickly.'),
           _bullet('Mining on battery may reduce its lifespan over time.'),
           _bullet('Performance varies by device — budget phones may lag.'),
-          _bullet('This is for testnet only. Real WATTx mining uses GPU/ASIC.'),
+          _bullet('You contribute SHARES to the WATTx pool — shares are not coins. '
+              'WTX is credited to your wallet address only when the pool finds a '
+              'block, and is spendable after it matures (~500 confirmations). A '
+              'phone\'s hashrate is small, so payouts are infrequent.'),
           if (_batteryState != BatteryState.charging)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -136,7 +161,7 @@ class _MiningScreenState extends State<MiningScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isRunning = _miner?.state == MinerState.running;
+    final isRunning = _miner?.state == PoolMinerState.running;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
@@ -184,6 +209,16 @@ class _MiningScreenState extends State<MiningScreen> {
             if (isRunning) ...[
               const SizedBox(height: 20),
               _StatsGrid(stats: _stats),
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'Shares are pool contributions, not spendable coins. Your '
+                  'balance grows only when the pool finds a block and the reward '
+                  'matures.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ),
             ],
           ]),
         ),
@@ -306,7 +341,7 @@ class _BatteryStrip extends StatelessWidget {
 }
 
 class _StatsGrid extends StatelessWidget {
-  final MiningStats stats;
+  final PoolMiningStats stats;
   const _StatsGrid({required this.stats});
 
   String _formatHr(double hr) {
@@ -327,7 +362,7 @@ class _StatsGrid extends StatelessWidget {
       children: [
         _StatTile('Hash Rate', _formatHr(stats.hashRate), Icons.speed),
         _StatTile('Total Hashes', _fmt(stats.totalHashes), Icons.calculate),
-        _StatTile('Blocks Found', '${stats.blocksFound}', Icons.check_circle_outline),
+        _StatTile('Shares', '${stats.sharesAccepted}/${stats.sharesRejected}', Icons.check_circle_outline),
         _StatTile('Elapsed', _fmtDur(stats.elapsed), Icons.timer_outlined),
       ],
     );

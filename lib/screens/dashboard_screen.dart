@@ -78,6 +78,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         balance: wallet.balance,
                         unconfirmed: wallet.unconfirmedBalance,
                         staking: wallet.stakingEnabled,
+                        maturing: wallet.maturingBalance,
                       ),
                       const SizedBox(height: 16),
                       if (wallet.initialBlockDownload)

@@ -4,8 +4,14 @@ class BalanceCard extends StatelessWidget {
   final double balance;
   final double unconfirmed;
   final bool staking;
+  final double maturing;
 
-  const BalanceCard({super.key, required this.balance, required this.unconfirmed, required this.staking});
+  const BalanceCard(
+      {super.key,
+      required this.balance,
+      required this.unconfirmed,
+      required this.staking,
+      this.maturing = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -42,10 +48,19 @@ class BalanceCard extends StatelessWidget {
           '${balance.toStringAsFixed(4)} WTX',
           style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: -0.5),
         ),
-        if (unconfirmed != balance && unconfirmed > 0) ...[
-          const SizedBox(height: 4),
-          Text('${unconfirmed.toStringAsFixed(4)} WTX unconfirmed',
-              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        const Text('spendable',
+            style: TextStyle(color: Colors.white38, fontSize: 11)),
+        if (maturing > 0) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.hourglass_bottom,
+                color: Colors.orange, size: 14),
+            const SizedBox(width: 4),
+            Text('+ ${maturing.toStringAsFixed(4)} WTX maturing',
+                style: const TextStyle(color: Colors.orange, fontSize: 12)),
+          ]),
+          const Text('mining payouts — spendable after ~100 confirmations',
+              style: TextStyle(color: Colors.white38, fontSize: 10)),
         ],
       ]),
     );
