@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/wallet_provider.dart';
-import '../services/staking_service.dart';
 
 /// Offline-staking delegation: hand your coins' staking rights to a superstaker
 /// (a pool) while your keys stay on the device. Backed by the on-chain 0x…0086
@@ -43,8 +42,6 @@ class _StakingScreenState extends State<StakingScreen> {
       setState(() => _message = txid != null
           ? 'Delegated. Transaction $txid'
           : context.read<WalletProvider>().errorMessage);
-    } on StakingNotReadyException catch (e) {
-      setState(() => _message = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

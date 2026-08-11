@@ -149,13 +149,13 @@ class WalletProvider extends ChangeNotifier {
     if (_wallet == null) return null;
     try {
       final utxos = await _node.getUtxos(_wallet!.legacyAddress);
-      final hex = StakingService.buildAddDelegation(
+      final built = StakingService.buildAddDelegation(
         wallet: _wallet!,
         stakerAddress: stakerAddress.trim(),
         feePercent: feePercent,
         utxos: utxos,
       );
-      final txid = await _node.broadcast(hex);
+      final txid = await _node.broadcast(built.hex);
       await refresh();
       return txid;
     } catch (e) {
