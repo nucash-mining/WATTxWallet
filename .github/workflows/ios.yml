@@ -82,25 +82,27 @@ jobs:
       - name: Build iOS (no codesign — sideloadable)
         if: ${{ env.APPLE_CERTIFICATE_BASE64 == '' }}
         run: |
+          VER=$(grep -m1 '^version:' pubspec.yaml | sed -E 's/^version: *([^+ ]+).*/\1/')
           flutter build ios --release --no-codesign
           # Package into unsigned IPA
           mkdir -p build/ios/ipa/Payload
           cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
           cd build/ios/ipa
-          zip -r ../WATTxWallet-v0.1.0-testnet-unsigned.ipa Payload
-          echo "IPA_PATH=build/ios/WATTxWallet-v0.1.0-testnet-unsigned.ipa" >> "$GITHUB_ENV"
-          echo "IPA_NAME=WATTxWallet-v0.1.0-testnet-unsigned.ipa" >> "$GITHUB_ENV"
+          zip -r ../WATTxWallet-v${VER}-unsigned.ipa Payload
+          echo "IPA_PATH=build/ios/WATTxWallet-v${VER}-unsigned.ipa" >> "$GITHUB_ENV"
+          echo "IPA_NAME=WATTxWallet-v${VER}-unsigned.ipa" >> "$GITHUB_ENV"
 
       - name: Build iOS (signed — with Apple Developer account)
         if: ${{ env.APPLE_CERTIFICATE_BASE64 != '' }}
         run: |
+          VER=$(grep -m1 '^version:' pubspec.yaml | sed -E 's/^version: *([^+ ]+).*/\1/')
           flutter build ipa --release \
             --export-options-plist=ios/ExportOptions.plist
           IPA=$(find build/ios/ipa -name "*.ipa" | head -1)
           BASENAME=$(basename "$IPA")
-          mv "$IPA" "build/ios/ipa/WATTxWallet-v0.1.0-testnet-${BASENAME}"
-          echo "IPA_PATH=build/ios/ipa/WATTxWallet-v0.1.0-testnet-${BASENAME}" >> "$GITHUB_ENV"
-          echo "IPA_NAME=WATTxWallet-v0.1.0-testnet-${BASENAME}" >> "$GITHUB_ENV"
+          mv "$IPA" "build/ios/ipa/WATTxWallet-v${VER}-${BASENAME}"
+          echo "IPA_PATH=build/ios/ipa/WATTxWallet-v${VER}-${BASENAME}" >> "$GITHUB_ENV"
+          echo "IPA_NAME=WATTxWallet-v${VER}-${BASENAME}" >> "$GITHUB_ENV"
 
       # ── Upload artifact ───────────────────────────────────────────────────────
       - name: Upload IPA artifact

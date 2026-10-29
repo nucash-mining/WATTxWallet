@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,9 +15,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 class LocalNode {
   static const _channel = MethodChannel('app.wattxchange.wattx_wallet/node');
 
+  /// Only the Android build ships the daemon. On iOS the channel has no
+  /// handler and calls would throw MissingPluginException, so skip them.
+  static bool get _native => Platform.isAndroid;
+
   /// False where no daemon ships for the device's ABI, so the UI can hide the
   /// option rather than offer something that cannot work.
   static Future<bool> supported() async {
+    if (!_native) return false;
     try {
       return await _channel.invokeMethod<bool>('supported') ?? false;
     } on PlatformException {
@@ -24,6 +31,7 @@ class LocalNode {
   }
 
   static Future<bool> isRunning() async {
+    if (!_native) return false;
     try {
       return await _channel.invokeMethod<bool>('isRunning') ?? false;
     } on PlatformException {
@@ -35,6 +43,7 @@ class LocalNode {
   /// start. The native side waits to see the process survive startup, so a
   /// daemon that exits immediately is reported rather than silently assumed up.
   static Future<String?> start() async {
+    if (!_native) return 'The full node is only available on Android.';
     try {
       await _channel.invokeMethod('start');
       return null;
@@ -63,6 +72,7 @@ class LocalNode {
   }
 
   static Future<void> stop() async {
+    if (!_native) return;
     try {
       await _channel.invokeMethod('stop');
     } on PlatformException {
@@ -74,6 +84,7 @@ class LocalNode {
   /// Loopback URL and the credential generated on this device at first start.
   /// Null until the node has run at least once.
   static Future<({String url, String user, String password})?> rpcInfo() async {
+    if (!_native) return null;
     try {
       final m = await _channel.invokeMapMethod<String, dynamic>('rpcInfo');
       if (m == null) return null;

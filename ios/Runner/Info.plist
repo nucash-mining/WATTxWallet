@@ -9,6 +9,9 @@
 	<!-- Camera permission for QR code scanning -->
 	<key>NSCameraUsageDescription</key>
 	<string>WATTx Wallet uses the camera to scan QR codes for wallet addresses.</string>
+	<!-- Face ID unlock on the lock screen (iOS kills the app without this) -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>WATTx Wallet uses Face ID to unlock your wallet.</string>
 	<!-- Background processing for CPU mining -->
 	<key>UIBackgroundModes</key>
 	<array>
