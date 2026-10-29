@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'local_node.dart';
+
 class RpcException implements Exception {
   final int code;
   final String message;
@@ -58,9 +60,23 @@ class RpcService {
   int get port => _port;
   bool get isTestnet => _testnet;
 
+  /// When the bundled daemon is running, every call goes to it instead of the
+  /// configured remote. Checked per call rather than latched at startup: the
+  /// node can be switched on or off, or die, while the app is open, and a
+  /// wallet that kept talking to a remote it thinks is local would be lying
+  /// about where its data came from.
+  Future<({String url, String user, String password})?> _localOverride() async {
+    if (!await LocalNode.isRunning()) return null;
+    return LocalNode.rpcInfo();
+  }
+
   Future<dynamic> call(String method, [List<dynamic> params = const []]) async {
-    final credentials = base64Encode(utf8.encode('$_user:$_password'));
-    final uri = Uri.parse('http://$_host:$_port/');
+    final local = await _localOverride();
+    final credentials = local != null
+        ? base64Encode(utf8.encode('${local.user}:${local.password}'))
+        : base64Encode(utf8.encode('$_user:$_password'));
+    final uri =
+        local != null ? Uri.parse(local.url) : Uri.parse('http://$_host:$_port/');
     final body = jsonEncode({
       'jsonrpc': '1.0',
       'id': method,

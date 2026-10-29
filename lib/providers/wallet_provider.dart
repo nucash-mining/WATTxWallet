@@ -38,7 +38,12 @@ class WalletProvider extends ChangeNotifier {
   bool get hasMaturing => _maturingSats > 0;
   double unconfirmedBalance = 0;
   List<Utxo> _utxos = [];
-  List<Map<String, dynamic>> transactions = [];
+  /// Newest-first history for this wallet's address. The first page is
+  /// reloaded on every refresh; [loadMoreHistory] appends older pages.
+  List<TxRecord> history = [];
+  String? _historyNext;
+  bool historyLoading = false;
+  bool get historyHasMore => _historyNext != null;
 
   // Staking (Qtum offline-staking delegation to a superstaker)
   bool stakingEnabled = true;
@@ -114,6 +119,46 @@ class WalletProvider extends ChangeNotifier {
       status = WalletStatus.error;
       errorMessage = 'Refresh failed: $e';
     }
+    await _refreshHistory();
+    notifyListeners();
+  }
+
+  /// Reload the newest page, keeping any older pages already loaded when they
+  /// still line up, so pulling to refresh does not collapse a long scroll.
+  Future<void> _refreshHistory() async {
+    if (_wallet == null) return;
+    try {
+      final page = await _node.getHistory(_wallet!.legacyAddress);
+      if (history.length <= page.items.length) {
+        history = page.items;
+        _historyNext = page.next;
+      } else {
+        final seen = page.items.map((t) => t.txid).toSet();
+        history = [
+          ...page.items,
+          ...history.where((t) => !seen.contains(t.txid)),
+        ];
+      }
+    } catch (_) {
+      // History is secondary: a failure here must not mark the wallet as
+      // disconnected when balances loaded fine.
+    }
+  }
+
+  Future<void> loadMoreHistory() async {
+    if (_wallet == null || historyLoading || _historyNext == null) return;
+    historyLoading = true;
+    notifyListeners();
+    try {
+      final page = await _node.getHistory(_wallet!.legacyAddress,
+          before: _historyNext);
+      final seen = history.map((t) => t.txid).toSet();
+      history = [...history, ...page.items.where((t) => !seen.contains(t.txid))];
+      _historyNext = page.next;
+    } catch (_) {
+      // Leave the cursor in place so scrolling again retries.
+    }
+    historyLoading = false;
     notifyListeners();
   }
 

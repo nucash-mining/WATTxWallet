@@ -13,6 +13,7 @@
 
     <!-- Foreground service for background mining -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
@@ -46,6 +47,16 @@
                 <data android:scheme="wattx"/>
             </intent-filter>
         </activity>
+
+        <!-- Keeps the on-device full node running while the phone is locked. -->
+        <service
+            android:name=".FullNodeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs a WATTx blockchain full node that validates the chain for the user's self-custody wallet"/>
+        </service>
 
         <meta-data
             android:name="flutterEmbedding"

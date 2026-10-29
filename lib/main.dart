@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/wallet_provider.dart';
+import 'screens/lock_screen.dart';
+import 'services/security_store.dart';
+import 'services/local_node.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/send_screen.dart';
 import 'screens/receive_screen.dart';
@@ -13,6 +16,7 @@ import 'screens/staking_screen.dart';
 // import 'screens/mining_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/swap_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,18 +52,44 @@ class WATTxApp extends StatelessWidget {
         '/receive': (_) => const ReceiveScreen(),
         '/staking': (_) => const StakingScreen(),
         '/settings': (_) => const SettingsScreen(),
+        '/swap': (_) => const SwapScreen(),
       },
     );
   }
 }
 
-/// Shows onboarding until a wallet exists, then the main shell.
-class _Gate extends StatelessWidget {
+/// Shows onboarding until a wallet exists, then the lock, then the main shell.
+class _Gate extends StatefulWidget {
   const _Gate();
+  @override
+  State<_Gate> createState() => _GateState();
+}
+
+class _GateState extends State<_Gate> {
+  bool _unlocked = false;
+  bool? _lockEnabled;
+
+  @override
+  void initState() {
+    super.initState();
+    SecurityStore.lockEnabled().then((v) {
+      if (mounted) setState(() => _lockEnabled = v);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final wallet = context.watch<WalletProvider>();
     if (wallet.needsOnboarding) return const OnboardingScreen();
+
+    // Until the answer is known, show nothing rather than the wallet: rendering
+    // balances for an instant before the lock appears would defeat it.
+    if (_lockEnabled == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_lockEnabled! && !_unlocked) {
+      return LockScreen(onUnlocked: () => setState(() => _unlocked = true));
+    }
     return const _Shell();
   }
 }
@@ -70,8 +100,27 @@ class _Shell extends StatefulWidget {
   State<_Shell> createState() => _ShellState();
 }
 
-class _ShellState extends State<_Shell> {
+class _ShellState extends State<_Shell> with WidgetsBindingObserver {
   int _idx = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Bring the full node back if the user left full-node mode on.
+    LocalNode.ensureWanted();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) LocalNode.ensureWanted();
+  }
 
   static const _screens = [
     DashboardScreen(),

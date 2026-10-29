@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/wallet_provider.dart';
+import 'entropy_screen.dart';
+import '../services/touch_entropy.dart';
 import '../services/wallet_store.dart';
 import '../services/wattx_wallet.dart';
 
@@ -20,11 +22,90 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String? _error;
 
   Future<void> _createNew() async {
+    // Collect gesture entropy first. The user can back out of the pad, in which
+    // case no wallet is created at all -- generating one and discarding it
+    // would leave a seed the user never saw briefly in memory for no reason.
+    final entropy = await Navigator.of(context).push<TouchEntropy>(
+      MaterialPageRoute(builder: (_) => const EntropyScreen()),
+    );
+    if (entropy == null || !mounted) return;
+
+    // The passphrase is collected before the wallet exists, so the seed is
+    // encrypted the first time it is written and never touches storage in the
+    // clear.
+    final passphrase = await _askPassphrase();
+    if (passphrase == null || !mounted) return;
+
     setState(() => _busy = true);
-    final wallet = await WalletStore.createNew(net: WalletProvider.net);
+    final wallet = await WalletStore.createNew(
+      net: WalletProvider.net,
+      entropy: entropy,
+      passphrase: passphrase,
+    );
     if (!mounted) return;
     setState(() => _busy = false);
     await _showBackup(wallet);
+  }
+
+
+  /// Ask for the passphrase that will encrypt the wallet.
+  ///
+  /// Returns null if the user backs out, in which case no wallet is created —
+  /// better than creating one and leaving the seed unencrypted because a dialog
+  /// was dismissed.
+  Future<String?> _askPassphrase() async {
+    final a = TextEditingController();
+    final b = TextEditingController();
+    String? error;
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Set a wallet passphrase'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text(
+              'This encrypts your recovery phrase on this device. It is '
+              'required to spend, and it cannot be reset — if you forget it, '
+              'only your recovery phrase can rebuild the wallet.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: a,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Passphrase'),
+            ),
+            TextField(
+              controller: b,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Repeat passphrase'),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 8),
+              Text(error!, style: const TextStyle(color: Color(0xFFF85149))),
+            ],
+          ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                if (a.text.length < 8) {
+                  setLocal(() => error = 'Use at least 8 characters.');
+                } else if (a.text != b.text) {
+                  setLocal(() => error = 'The two entries do not match.');
+                } else {
+                  Navigator.pop(ctx, a.text);
+                }
+              },
+              child: const Text('Create wallet'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showBackup(WattxWallet wallet) async {

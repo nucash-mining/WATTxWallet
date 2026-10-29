@@ -9,7 +9,9 @@ class QuickActions extends StatelessWidget {
       _action(context, Icons.send, 'Send', '/send', const Color(0xFFF7C948)),
       _action(context, Icons.qr_code, 'Receive', '/receive', const Color(0xFF3FB950)),
       _action(context, Icons.stacked_bar_chart, 'Stake', '/staking', const Color(0xFF58A6FF)),
-      _action(context, Icons.memory, 'Mine', '/mining', const Color(0xFFFF7B54)),
+      // Swap replaces Mine: phone mining was removed (see main.dart), so the
+      // old '/mining' route no longer existed and the button did nothing.
+      _action(context, Icons.swap_horiz, 'Swap', '/swap', const Color(0xFFFF7B54)),
     ]);
   }
 

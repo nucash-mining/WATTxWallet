@@ -60,6 +60,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: const Icon(Icons.refresh, color: Colors.white54),
             onPressed: () => wallet.refresh(),
           ),
+          // Settings holds the security controls (PIN, biometrics, 2FA) and the
+          // full-node switch. It was previously reachable only through a button
+          // labelled "Edit RPC Settings" further down the page, so there was no
+          // way to guess those settings existed at all.
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.white54),
+            tooltip: 'Settings, security and node',
+            onPressed: () => Navigator.pushNamed(context, '/settings'),
+          ),
           _NetworkDot(peers: wallet.connectionCount),
           const SizedBox(width: 4),
         ],
@@ -147,7 +156,7 @@ class _ErrorView extends StatelessWidget {
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7C948), foregroundColor: Colors.black),
           icon: const Icon(Icons.settings),
-          label: const Text('Edit RPC Settings'),
+          label: const Text('Settings, security and node'),
           onPressed: () => Navigator.pushNamed(context, '/settings'),
         ),
       ]),
